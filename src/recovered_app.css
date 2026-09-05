@@ -1,0 +1,54 @@
+Created At: 2026-09-05T03:46:13+05:30
+Completed At: 2026-09-05T03:46:13+05:30
+File Path: `file:///d:/sconnect/src/App.css`
+Total Lines: 46
+Total Bytes: 898
+Showing lines 1 to 46
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: /* ================================================
+2:    App — Root layout
+3:    ================================================ */
+4: 
+5: .app {
+6:   position: relative;
+7:   min-height: 100vh;
+8:   background: var(--color-bg);
+9:   isolation: isolate;
+10: }
+11: 
+12: .app::before,
+13: .app::after {
+14:   content: '';
+15:   position: fixed;
+16:   pointer-events: none;
+17:   z-index: 0;
+18:   filter: blur(80px);
+19:   opacity: 0.7;
+20: }
+21: 
+22: .app::before {
+23:   top: -10rem;
+24:   left: -12rem;
+25:   width: 28rem;
+26:   height: 28rem;
+27:   background: radial-gradient(circle, rgba(182, 236, 109, 0.15) 0%, transparent 72%);
+28: }
+29: 
+30: .app::after {
+31:   right: -10rem;
+32:   top: 32vh;
+33:   width: 26rem;
+34:   height: 26rem;
+35:   background: radial-gradient(circle, rgba(125, 163, 255, 0.12) 0%, transparent 74%);
+36: }
+37: 
+38: /* Placeholder sections for future phases */
+39: .app__placeholder {
+40:   min-height: 100vh;
+41:   display: flex;
+42:   align-items: center;
+43:   justify-content: center;
+44:   background: var(--color-bg);
+45: }
+46: 
+The above content shows the entire, complete file contents of the requested file.

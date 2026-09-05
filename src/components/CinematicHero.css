@@ -1,0 +1,587 @@
+/* ================================================
+   CinematicHero — Pinned scroll-driven cinematic
+   sequence: Hero Intro → Temple (01) → Street (02) → Seashore (03) → Desert (04)
+   ================================================ */
+
+/* ---- Container & Viewport ---- */
+
+.cinematic {
+  position: relative;
+  height: 1250vh; /* Continuous 5-chapter scroll travel with ample room for full 7-second video scrubbing */
+  --camera-x: 0;
+  --camera-y: 0;
+  perspective: 1600px;
+}
+
+.cinematic__viewport {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Dedicated Full-Screen Stage with Perspective */
+.cinematic__stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1200px;
+}
+
+/* Full-Bleed 3D Card that scales smoothly */
+.cinematic__3d-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* ---- Scene Layers ---- */
+
+.cinematic__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  will-change: transform, opacity;
+  transform-origin: center center;
+}
+
+.cinematic__layer--hero {
+  z-index: 1;
+  opacity: 1;
+  visibility: visible;
+}
+
+.cinematic__layer--temple {
+  z-index: 2;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.cinematic__layer--street {
+  z-index: 3;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.cinematic__layer--beach {
+  z-index: 4;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.cinematic__layer--desert {
+  z-index: 5;
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ---- Video Elements (Full-Bleed, Bright, Solar Panels Clear Below Navbar) ---- */
+
+.cinematic__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 38%; /* Shifts framing so top solar panels & camera are fully visible below navbar */
+  display: block;
+}
+
+.cinematic__video--hero {
+  object-position: center 38%;
+}
+
+.cinematic__video--temple {
+  object-position: center 35%;
+}
+
+.cinematic__video--street {
+  object-position: center 35%;
+}
+
+.cinematic__video--beach {
+  object-position: center 35%;
+}
+
+.cinematic__video--desert {
+  object-position: center 35%;
+}
+
+/* ---- Cinematic Overlays (Kept subtle, no dark tinting) ---- */
+
+.cinematic__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Glow — subtle product luminance hint */
+.cinematic__overlay--glow {
+  background: radial-gradient(
+    ellipse 50% 30% at 50% 75%,
+    rgba(182, 236, 109, 0.05) 0%,
+    transparent 70%
+  );
+}
+
+/* Street glow — subtle urban ambient lighting */
+.cinematic__overlay--street-glow {
+  background: radial-gradient(
+    ellipse 65% 45% at 50% 55%,
+    rgba(182, 236, 109, 0.05) 0%,
+    transparent 70%
+  );
+}
+
+/* Beach glow — subtle warm horizon solar bloom */
+.cinematic__overlay--beach-glow {
+  background: radial-gradient(
+    ellipse 70% 48% at 50% 52%,
+    rgba(255, 180, 80, 0.05) 0%,
+    transparent 70%
+  );
+}
+
+/* Desert glow — subtle solar corona */
+.cinematic__overlay--desert-glow {
+  background: radial-gradient(
+    ellipse 75% 50% at 50% 50%,
+    rgba(255, 170, 50, 0.06) 0%,
+    transparent 75%
+  );
+}
+
+/* ================================================
+   Subtle Coastal & Desert Atmospheric Effects
+   ================================================ */
+
+.cinematic__atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 12;
+  opacity: 0;
+  will-change: opacity;
+}
+
+.cinematic__mist-haze {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 45vh;
+  background: radial-gradient(
+    ellipse 85% 60% at 50% 100%,
+    rgba(255, 230, 200, 0.04) 0%,
+    rgba(182, 236, 109, 0.02) 40%,
+    transparent 70%
+  );
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+.cinematic__solar-flare {
+  position: absolute;
+  top: 15%;
+  right: 25%;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 200, 110, 0.05) 0%,
+    rgba(255, 170, 70, 0.02) 45%,
+    transparent 70%
+  );
+  filter: blur(30px);
+  pointer-events: none;
+}
+
+/* Desert Climax atmosphere */
+.cinematic__desert-corona {
+  position: absolute;
+  top: 12%;
+  left: 35%;
+  width: 450px;
+  height: 450px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 180, 50, 0.07) 0%,
+    rgba(255, 140, 20, 0.02) 50%,
+    transparent 75%
+  );
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.cinematic__desert-haze {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40vh;
+  background: radial-gradient(
+    ellipse 80% 50% at 50% 100%,
+    rgba(255, 160, 40, 0.04) 0%,
+    transparent 70%
+  );
+  filter: blur(16px);
+  pointer-events: none;
+}
+
+/* ================================================
+   Exit Transition Overlay to Website Content
+   ================================================ */
+
+.cinematic__exit-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 35%,
+    rgba(5, 5, 7, 0.4) 60%,
+    rgba(5, 5, 7, 0.85) 82%,
+    var(--color-bg) 100%
+  );
+  opacity: 0;
+  will-change: opacity;
+}
+
+/* ================================================
+   Ambient Parallax Depth Layer
+   ================================================ */
+
+.cinematic__parallax-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+  overflow: hidden;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.cinematic__parallax-particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(1px);
+}
+
+.cinematic__parallax-particle--1 {
+  top: 25%;
+  left: 18%;
+  width: 3px;
+  height: 3px;
+  background: rgba(182, 236, 109, 0.6);
+  box-shadow: 0 0 12px 2px rgba(182, 236, 109, 0.4);
+}
+
+.cinematic__parallax-particle--2 {
+  top: 60%;
+  right: 22%;
+  width: 4px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 16px 3px rgba(182, 236, 109, 0.3);
+}
+
+.cinematic__parallax-particle--3 {
+  top: 40%;
+  right: 14%;
+  width: 2px;
+  height: 2px;
+  background: rgba(167, 139, 250, 0.6);
+  box-shadow: 0 0 10px 1px rgba(167, 139, 250, 0.5);
+}
+
+/* ================================================
+   Hero Content — Title, Tagline, Scroll Line (Clean Unboxed Typography)
+   ================================================ */
+
+.cinematic__hero-content {
+  position: absolute;
+  bottom: clamp(2.5rem, 6vh, 4.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-content);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  will-change: transform, opacity;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  max-width: min(92vw, 760px);
+  pointer-events: none;
+}
+
+.cinematic__title {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-hero);
+  letter-spacing: var(--ls-ultra);
+  line-height: var(--lh-tight);
+  color: var(--color-text);
+  text-transform: uppercase;
+  text-shadow:
+    0 2px 20px rgba(0, 0, 0, 0.85),
+    0 6px 45px rgba(0, 0, 0, 0.7),
+    0 0 80px rgba(182, 236, 109, 0.12);
+}
+
+.cinematic__tagline {
+  font-family: var(--font-body);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-body);
+  letter-spacing: var(--ls-wide);
+  line-height: var(--lh-normal);
+  color: #e2e8f0;
+  text-transform: uppercase;
+  max-width: 520px;
+  text-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.95),
+    0 4px 28px rgba(0, 0, 0, 0.85);
+}
+
+/* ---- Scroll Indicator ---- */
+
+.cinematic__scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.cinematic__scroll-text {
+  font-family: var(--font-body);
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--ls-ultra);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+.cinematic__scroll-line {
+  width: 1px;
+  height: 40px;
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+.cinematic__scroll-line::after {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-accent)
+  );
+  animation: scrollPulse 2s ease-in-out infinite;
+}
+
+@keyframes scrollPulse {
+  0%   { top: -50%;  opacity: 0; }
+  50%  { opacity: 1; }
+  100% { top: 100%;  opacity: 0; }
+}
+
+/* ================================================
+   Scene Content (01 Temple, 02 Street, 03 Seashore, 04 Desert)
+   Pure, clean, unboxed typography directly on video
+   ================================================ */
+
+.cinematic__scene-content {
+  position: absolute;
+  bottom: clamp(2.5rem, 6.5vh, 5.5rem);
+  left: clamp(1.8rem, 6vw, 6rem);
+  z-index: var(--z-content);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  opacity: 0;
+  will-change: transform, opacity;
+  max-width: min(88vw, 520px);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  pointer-events: none;
+}
+
+.cinematic__scene-index {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.25em;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+}
+
+.cinematic__scene-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2rem, 4.5vw, 3.25rem);
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+  color: #ffffff;
+  text-transform: uppercase;
+  text-shadow:
+    0 2px 15px rgba(0, 0, 0, 0.95),
+    0 4px 35px rgba(0, 0, 0, 0.85);
+}
+
+.cinematic__scene-separator {
+  width: 44px;
+  height: 2px;
+  background: var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent);
+  margin: 0.15rem 0;
+  transform-origin: left center;
+}
+
+.cinematic__scene-desc {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: clamp(0.95rem, 1.25vw, 1.125rem);
+  line-height: 1.6;
+  color: #e5e7eb;
+  text-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.95),
+    0 4px 24px rgba(0, 0, 0, 0.85);
+  max-width: 460px;
+}
+
+/* ---- Specific Chapter Nuances ---- */
+
+.cinematic__scene-content--street .cinematic__scene-title {
+  letter-spacing: 0.08em;
+}
+
+.cinematic__scene-content--street .cinematic__scene-desc {
+  color: #e5e7eb;
+}
+
+.cinematic__scene-content--beach .cinematic__scene-title {
+  letter-spacing: 0.10em;
+}
+
+.cinematic__scene-content--beach .cinematic__scene-desc {
+  color: #f3f4f6;
+  max-width: 450px;
+}
+
+.cinematic__scene-content--desert .cinematic__scene-title {
+  letter-spacing: 0.12em;
+}
+
+.cinematic__scene-content--desert .cinematic__scene-desc {
+  color: #f9fafb;
+  max-width: 460px;
+}
+
+/* ================================================
+   Responsive Styling
+   ================================================ */
+
+@media (max-width: 768px) {
+  .cinematic {
+    height: 900vh;
+  }
+
+  .cinematic__stage {
+    padding-top: clamp(65px, 9vh, 80px);
+    padding-bottom: clamp(16px, 3vh, 32px);
+    padding-inline: 12px;
+  }
+
+  .cinematic__3d-card {
+    border-radius: 14px;
+  }
+
+  .cinematic__hero-content {
+    bottom: clamp(1.8rem, 3.5vh, 2.5rem);
+    gap: var(--space-1);
+    max-width: 92vw;
+  }
+
+  .cinematic__scroll-line {
+    height: 32px;
+  }
+
+  .cinematic__scene-content {
+    bottom: clamp(2rem, 5vh, 3.5rem);
+    left: 1.25rem;
+    right: 1.25rem;
+    max-width: calc(100vw - 2.5rem);
+  }
+
+  .cinematic__scene-title {
+    font-size: clamp(1.6rem, 6.5vw, 2.2rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cinematic--reduced-motion {
+    height: auto;
+  }
+
+  .cinematic--reduced-motion .cinematic__viewport {
+    position: relative;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .cinematic--reduced-motion .cinematic__layer:not(.cinematic__layer--hero),
+  .cinematic--reduced-motion .cinematic__atmosphere,
+  .cinematic--reduced-motion .cinematic__parallax-layer,
+  .cinematic--reduced-motion .cinematic__scene-content,
+  .cinematic--reduced-motion .cinematic__exit-fade {
+    display: none;
+  }
+
+  .cinematic--reduced-motion .cinematic__scroll-line::after {
+    animation: none;
+  }
+}
+
