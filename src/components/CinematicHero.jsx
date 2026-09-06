@@ -1,15 +1,14 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { useState } from 'react';
 import './CinematicHero.css';
 
 gsap.registerPlugin(ScrollTrigger);
 
 /* ================================================
-   Scene Definitions
+   Scene Definitions & Media Configuration
    ================================================ */
 
 const SCENES = [
@@ -92,33 +91,6 @@ const scrollVariant = {
 };
 
 /* ================================================
-   Smooth Video Seeking Helper (Bidirectional Scrubbing)
-   ================================================ */
-
-const SCENE_SCRUB_SECONDS = 7.0; // Scrub entire 6-7 seconds of motion for each scene as requested
-
-const seekVideo = (video, targetTime) => {
-  if (!video) return;
-  const duration = (video.duration && !isNaN(video.duration)) ? video.duration : 10;
-  const maxSafeTime = Math.min(duration - 0.05, SCENE_SCRUB_SECONDS);
-  const clamped = Math.max(0.01, Math.min(targetTime, maxSafeTime));
-
-  video._targetTime = clamped;
-
-  if (Math.abs(video.currentTime - clamped) < 0.02) return;
-
-  if (video.seeking) {
-    return;
-  }
-
-  try {
-    video.currentTime = clamped;
-  } catch {
-    // Ignore seek errors
-  }
-};
-
-/* ================================================
    CinematicHero Component
    ================================================ */
 
@@ -145,10 +117,11 @@ export default function CinematicHero({ onReady }) {
   const beachVideoRef       = useRef(null);
   const desertVideoRef      = useRef(null);
 
-  /* Atmosphere & Stage Refs */
+  /* Atmosphere, Smoke & Stage Refs */
   const card3dRef           = useRef(null);
   const stageRef            = useRef(null);
   const parallaxLayerRef    = useRef(null);
+  const smokeOverlayRef     = useRef(null);
   const beachAtmosphereRef  = useRef(null);
   const desertAtmosphereRef = useRef(null);
   const streetSeparatorRef  = useRef(null);
@@ -156,6 +129,15 @@ export default function CinematicHero({ onReady }) {
   const desertSeparatorRef  = useRef(null);
   const exitFadeRef         = useRef(null);
   const heroReadyRef        = useRef(false);
+
+  /* Timeline Sync State Refs (Bypassing React re-renders completely for 60 FPS) */
+  const scrubStateRef = useRef({
+    hero: { target: 0, current: 0, duration: 10.03, isSeeking: false },
+    temple: { target: 0, current: 0, duration: 10.03, isSeeking: false },
+    street: { target: 0, current: 0, duration: 10.03, isSeeking: false },
+    beach: { target: 0, current: 0, duration: 10.03, isSeeking: false },
+    desert: { target: 0, current: 0, duration: 10.03, isSeeking: false },
+  });
 
   const prefersReducedMotion = useReducedMotion();
 
@@ -166,75 +148,105 @@ export default function CinematicHero({ onReady }) {
   const beachSrc  = useResponsiveVideo(VIDEOS.beach.desktop, VIDEOS.beach.mobile);
   const desertSrc = useResponsiveVideo(VIDEOS.desert.desktop, VIDEOS.desert.mobile);
 
-  /* Setup video frame scrubbing listeners and ensure video pause */
+  /* ================================================
+     High-Performance RAF Video Scrubbing Engine
+     ================================================ */
   useEffect(() => {
-    const videos = [
-      heroVideoRef.current,
-      templeVideoRef.current,
-      streetVideoRef.current,
-      beachVideoRef.current,
-      desertVideoRef.current,
+    const videoMap = [
+      { key: 'hero', ref: heroVideoRef },
+      { key: 'temple', ref: templeVideoRef },
+      { key: 'street', ref: streetVideoRef },
+      { key: 'beach', ref: beachVideoRef },
+      { key: 'desert', ref: desertVideoRef },
     ];
 
-    const handleSeeked = (e) => {
-      const video = e.target;
-      if (video && typeof video._targetTime === 'number') {
-        const diff = Math.abs(video.currentTime - video._targetTime);
-        if (diff > 0.02) {
-          try {
-            video.currentTime = video._targetTime;
-          } catch {}
+    const state = scrubStateRef.current;
+
+    // Attach metadata listeners and ensure videos stay paused & preloaded
+    const cleanups = [];
+    videoMap.forEach(({ key, ref }) => {
+      const vid = ref.current;
+      if (!vid) return;
+
+      vid.pause();
+
+      const onMeta = () => {
+        if (vid.duration && !isNaN(vid.duration) && vid.duration > 0) {
+          state[key].duration = vid.duration;
         }
-      }
-    };
+      };
 
-    const handleLoaded = (e) => {
-      const video = e.target;
-      if (!video) return;
-      video.pause();
-      if (typeof video._targetTime === 'number') {
-        try {
-          video.currentTime = video._targetTime;
-        } catch {}
-      } else {
-        try {
-          video.currentTime = 0.01;
-        } catch {}
-      }
-    };
+      const onSeeked = () => {
+        state[key].isSeeking = false;
+      };
 
-    videos.forEach((video) => {
-      if (!video) return;
-      video.pause();
-      video.addEventListener('seeked', handleSeeked);
-      video.addEventListener('loadedmetadata', handleLoaded);
-      video.addEventListener('canplay', handleLoaded);
+      vid.addEventListener('loadedmetadata', onMeta);
+      vid.addEventListener('canplay', onMeta);
+      vid.addEventListener('seeked', onSeeked);
+
+      if (vid.duration && !isNaN(vid.duration) && vid.duration > 0) {
+        state[key].duration = vid.duration;
+      }
+
+      cleanups.push(() => {
+        vid.removeEventListener('loadedmetadata', onMeta);
+        vid.removeEventListener('canplay', onMeta);
+        vid.removeEventListener('seeked', onSeeked);
+      });
     });
 
-    // High-frequency sync ticker for smooth forward & reverse frame scrubbing
-    const tickerCallback = () => {
-      for (let i = 0; i < videos.length; i++) {
-        const vid = videos[i];
-        if (vid && typeof vid._targetTime === 'number' && !vid.seeking) {
-          if (Math.abs(vid.currentTime - vid._targetTime) > 0.03) {
+    let animationFrameId;
+    let isRunning = true;
+
+    // Dedicated requestAnimationFrame timeline scrubber loop
+    const renderLoop = () => {
+      if (!isRunning) return;
+
+      for (let i = 0; i < videoMap.length; i++) {
+        const { key, ref } = videoMap[i];
+        const vid = ref.current;
+        if (!vid) continue;
+
+        const s = state[key];
+        const target = s.target;
+        const current = s.current;
+
+        const diff = target - current;
+
+        // Smoothly interpolate towards target time (lerp: 0.22 per frame)
+        if (Math.abs(diff) > 0.003) {
+          s.current += diff * 0.22;
+        } else {
+          s.current = target;
+        }
+
+        // Only dispatch seek when delta is significant and video is not saturated seeking
+        const timeDelta = Math.abs(vid.currentTime - s.current);
+        if (timeDelta > 0.02) {
+          if (!vid.seeking && !s.isSeeking) {
+            s.isSeeking = true;
             try {
-              vid.currentTime = vid._targetTime;
-            } catch {}
+              if (typeof vid.fastSeek === 'function') {
+                vid.fastSeek(s.current);
+              } else {
+                vid.currentTime = s.current;
+              }
+            } catch {
+              s.isSeeking = false;
+            }
           }
         }
       }
+
+      animationFrameId = requestAnimationFrame(renderLoop);
     };
 
-    gsap.ticker.add(tickerCallback);
+    animationFrameId = requestAnimationFrame(renderLoop);
 
     return () => {
-      gsap.ticker.remove(tickerCallback);
-      videos.forEach((video) => {
-        if (!video) return;
-        video.removeEventListener('seeked', handleSeeked);
-        video.removeEventListener('loadedmetadata', handleLoaded);
-        video.removeEventListener('canplay', handleLoaded);
-      });
+      isRunning = false;
+      cancelAnimationFrame(animationFrameId);
+      cleanups.forEach((fn) => fn());
     };
   }, [heroSrc, templeSrc, streetSrc, beachSrc, desertSrc]);
 
@@ -279,30 +291,22 @@ export default function CinematicHero({ onReady }) {
     };
   }, [prefersReducedMotion]);
 
-  /* ---- GSAP Scroll-driven Timeline ---- */
+  /* ---- GSAP Scroll-driven Master Timeline ---- */
   useGSAP(() => {
     if (prefersReducedMotion) return undefined;
+
+    const state = scrubStateRef.current;
 
     const tl = gsap.timeline({
       scrollTrigger: {
         trigger: containerRef.current,
         start: 'top top',
         end: 'bottom bottom',
-        scrub: 0.3, // Instantaneous, buttery bidirectional frame scrubbing
+        scrub: 0.15, // Responsive 60 FPS scroll tracking mapped to RAF lerp engine
       },
     });
 
-    /*
-     * Continuous 5-Act Cinematic Narrative with Real-Time 3D Frame Scrubbing:
-     *
-     * In EACH of the 5 scenes:
-     * - The scene layer is 100% visible and pristine.
-     * - The video scrubs continuously through the entire 6-7 seconds (0.0s -> 7.0s) as you scroll down.
-     * - When you reverse scroll (scroll up), the video scrubs backwards (7.0s -> 0.0s) smoothly!
-     * - Clean scene crossfades occur strictly at the boundaries between chapters.
-     */
-
-    /* ---- Real-Time 3D Card Enlargement on Initial Scroll ---- */
+    /* ---- 3D Card Enlargement on Initial Scroll ---- */
     if (card3dRef.current) {
       tl.fromTo(card3dRef.current,
         {
@@ -323,256 +327,279 @@ export default function CinematicHero({ onReady }) {
       );
     }
 
-    /* ---- Video Scrubbing Tracking Object ---- */
-    const videoProgress = {
-      hero: 0,
-      temple: 0,
-      street: 0,
-      beach: 0,
-      desert: 0,
+    /* ---- Master Progress Target Variables ---- */
+    const timelineTargets = {
+      heroProgress: 0,
+      templeProgress: 0,
+      streetProgress: 0,
+      beachProgress: 0,
+      desertProgress: 0,
     };
 
     /* ================================================================
-       ACT 0: HERO INTRO (0.00 -> 0.20)
-       - Dedicated Video Scrub: 0.0s -> 7.0s across 0.00 -> 0.17
+       ACT 0: INTRO SCENE & FULL 10-SECOND SCRUB (0.000 -> 0.200)
+       - Segment 1: 0.000 -> 0.060 maps to 0s -> 3.5s
+       - Segment 2: 0.060 -> 0.120 maps to 3.5s -> 7.5s
+       - Segment 3: 0.120 -> 0.170 maps to 7.5s -> 10.0s (full video timeline covered)
+       - Reverses completely & smoothly on reverse scroll
        ================================================================ */
-    tl.to(videoProgress, {
-      hero: 1.0,
+    tl.to(timelineTargets, {
+      heroProgress: 1.0,
       ease: 'none',
-      duration: 0.17,
+      duration: 0.170,
       onUpdate: () => {
-        const vid = heroVideoRef.current;
-        if (vid) seekVideo(vid, videoProgress.hero * SCENE_SCRUB_SECONDS);
+        const p = timelineTargets.heroProgress;
+        const duration = state.hero.duration || 10.03;
+        state.hero.target = Math.max(0.01, Math.min(p * duration, duration - 0.04));
       },
-    }, 0.00);
+    }, 0.000);
 
     // Hero Text exit
     tl.to(heroContentRef.current, {
       autoAlpha: 0,
       y: -40,
-      duration: 0.04,
+      duration: 0.040,
       ease: 'power2.in',
-    }, 0.12);
+    }, 0.110);
 
-    // Crossfade: Hero -> Temple
+    // Smoke / Atmospheric Transition Effect at the end of Intro (0.160 -> 0.200)
+    if (smokeOverlayRef.current) {
+      tl.fromTo(smokeOverlayRef.current,
+        { autoAlpha: 0, scale: 0.96, filter: 'blur(2px)' },
+        { autoAlpha: 1, scale: 1.04, filter: 'blur(0px)', duration: 0.020, ease: 'power2.out' },
+        0.160
+      );
+      tl.to(smokeOverlayRef.current,
+        { autoAlpha: 0, scale: 1.08, filter: 'blur(4px)', duration: 0.020, ease: 'power2.in' },
+        0.180
+      );
+    }
+
+    // Seamless Crossfade: Hero -> Temple (0.170 -> 0.200)
     tl.to(heroLayerRef.current, {
       autoAlpha: 0,
-      scale: 1.03,
-      duration: 0.04,
+      scale: 1.02,
+      duration: 0.030,
       ease: 'power1.inOut',
-    }, 0.16);
+    }, 0.170);
 
     tl.fromTo(templeLayerRef.current,
-      { autoAlpha: 0, scale: 0.97 },
-      { autoAlpha: 1, scale: 1.0, duration: 0.04, ease: 'power1.inOut' },
-      0.16
+      { autoAlpha: 0, scale: 0.98 },
+      { autoAlpha: 1, scale: 1.0, duration: 0.030, ease: 'power1.inOut' },
+      0.170
     );
 
     /* ================================================================
-       ACT 1: TEMPLE SCENE (0.20 -> 0.40)
-       - Dedicated Video Scrub: 0.0s -> 7.0s across 0.20 -> 0.37
+       ACT 1: TEMPLE SCENE & FULL 10-SECOND SCRUB (0.200 -> 0.400)
+       - Segment 1: 0.200 -> 0.260 maps to 0s -> 3.0s
+       - Segment 2: 0.260 -> 0.320 maps to 3.0s -> 7.0s
+       - Segment 3: 0.320 -> 0.370 maps to 7.0s -> end
        ================================================================ */
-    tl.to(videoProgress, {
-      temple: 1.0,
+    tl.to(timelineTargets, {
+      templeProgress: 1.0,
       ease: 'none',
-      duration: 0.17,
+      duration: 0.170,
       onUpdate: () => {
-        const vid = templeVideoRef.current;
-        if (vid) seekVideo(vid, videoProgress.temple * SCENE_SCRUB_SECONDS);
+        const p = timelineTargets.templeProgress;
+        const duration = state.temple.duration || 10.03;
+        state.temple.target = Math.max(0.01, Math.min(p * duration, duration - 0.04));
       },
-    }, 0.20);
+    }, 0.200);
 
     // Temple text entrance
     tl.fromTo(templeContentRef.current,
       { autoAlpha: 0, y: 35 },
-      { autoAlpha: 1, y: 0, duration: 0.04, ease: 'power2.out' },
-      0.20
+      { autoAlpha: 1, y: 0, duration: 0.035, ease: 'power2.out' },
+      0.200
     );
 
-    // Temple text slow parallax drift
+    // Temple text parallax drift
     tl.to(templeContentRef.current, {
       y: -15,
-      duration: 0.10,
+      duration: 0.100,
       ease: 'none',
-    }, 0.24);
+    }, 0.235);
 
     // Temple text exit
     tl.to(templeContentRef.current, {
       autoAlpha: 0,
       y: -40,
-      duration: 0.03,
+      duration: 0.035,
       ease: 'power2.in',
-    }, 0.34);
+    }, 0.335);
 
-    // Crossfade: Temple -> Street
+    // Seamless Crossfade: Temple -> Street (0.370 -> 0.400)
     tl.to(templeLayerRef.current, {
       autoAlpha: 0,
-      scale: 1.03,
-      duration: 0.04,
+      scale: 1.02,
+      duration: 0.030,
       ease: 'power1.inOut',
-    }, 0.36);
+    }, 0.370);
 
     tl.fromTo(streetLayerRef.current,
-      { autoAlpha: 0, scale: 0.97 },
-      { autoAlpha: 1, scale: 1.0, duration: 0.04, ease: 'power1.inOut' },
-      0.36
+      { autoAlpha: 0, scale: 0.98 },
+      { autoAlpha: 1, scale: 1.0, duration: 0.030, ease: 'power1.inOut' },
+      0.370
     );
 
     /* ================================================================
-       ACT 2: URBAN MOBILITY / STREET SCENE (0.40 -> 0.60)
-       - Dedicated Video Scrub: 0.0s -> 7.0s across 0.40 -> 0.57
+       ACT 2: URBAN MOBILITY / STREET SCENE & FULL SCRUB (0.400 -> 0.600)
+       - Full 0s -> 10s video scrubbing across scroll segment
        ================================================================ */
-    tl.to(videoProgress, {
-      street: 1.0,
+    tl.to(timelineTargets, {
+      streetProgress: 1.0,
       ease: 'none',
-      duration: 0.17,
+      duration: 0.170,
       onUpdate: () => {
-        const vid = streetVideoRef.current;
-        if (vid) seekVideo(vid, videoProgress.street * SCENE_SCRUB_SECONDS);
+        const p = timelineTargets.streetProgress;
+        const duration = state.street.duration || 10.03;
+        state.street.target = Math.max(0.01, Math.min(p * duration, duration - 0.04));
       },
-    }, 0.40);
+    }, 0.400);
 
     // Street text & separator entrance
     tl.fromTo(streetContentRef.current,
       { autoAlpha: 0, y: 35 },
-      { autoAlpha: 1, y: 0, duration: 0.04, ease: 'power2.out' },
-      0.40
+      { autoAlpha: 1, y: 0, duration: 0.035, ease: 'power2.out' },
+      0.400
     );
 
     if (streetSeparatorRef.current) {
       tl.fromTo(streetSeparatorRef.current,
         { width: 0, autoAlpha: 0 },
-        { width: 44, autoAlpha: 1, duration: 0.03, ease: 'power2.out' },
-        0.41
+        { width: 44, autoAlpha: 1, duration: 0.025, ease: 'power2.out' },
+        0.410
       );
     }
 
     // Street text drift
     tl.to(streetContentRef.current, {
       y: -15,
-      duration: 0.10,
+      duration: 0.100,
       ease: 'none',
-    }, 0.44);
+    }, 0.435);
 
     // Street text exit
     tl.to(streetContentRef.current, {
       autoAlpha: 0,
       y: -40,
-      duration: 0.03,
+      duration: 0.035,
       ease: 'power2.in',
-    }, 0.54);
+    }, 0.535);
 
-    // Crossfade: Street -> Beach
+    // Seamless Crossfade: Street -> Beach (0.570 -> 0.600)
     tl.to(streetLayerRef.current, {
       autoAlpha: 0,
-      scale: 1.03,
-      duration: 0.04,
+      scale: 1.02,
+      duration: 0.030,
       ease: 'power1.inOut',
-    }, 0.56);
+    }, 0.570);
 
     tl.fromTo(beachLayerRef.current,
-      { autoAlpha: 0, scale: 0.97 },
-      { autoAlpha: 1, scale: 1.0, duration: 0.04, ease: 'power1.inOut' },
-      0.56
+      { autoAlpha: 0, scale: 0.98 },
+      { autoAlpha: 1, scale: 1.0, duration: 0.030, ease: 'power1.inOut' },
+      0.570
     );
 
     /* ================================================================
-       ACT 3: SEASHORE / BEACH SCENE (0.60 -> 0.80)
-       - Dedicated Video Scrub: 0.0s -> 7.0s across 0.60 -> 0.77
+       ACT 3: SEASHORE / BEACH SCENE & FULL SCRUB (0.600 -> 0.800)
+       - Full 0s -> 10s video scrubbing across scroll segment
        ================================================================ */
-    tl.to(videoProgress, {
-      beach: 1.0,
+    tl.to(timelineTargets, {
+      beachProgress: 1.0,
       ease: 'none',
-      duration: 0.17,
+      duration: 0.170,
       onUpdate: () => {
-        const vid = beachVideoRef.current;
-        if (vid) seekVideo(vid, videoProgress.beach * SCENE_SCRUB_SECONDS);
+        const p = timelineTargets.beachProgress;
+        const duration = state.beach.duration || 10.03;
+        state.beach.target = Math.max(0.01, Math.min(p * duration, duration - 0.04));
       },
-    }, 0.60);
+    }, 0.600);
 
     // Beach text & separator entrance
     tl.fromTo(beachContentRef.current,
       { autoAlpha: 0, y: 35 },
-      { autoAlpha: 1, y: 0, duration: 0.04, ease: 'power2.out' },
-      0.60
+      { autoAlpha: 1, y: 0, duration: 0.035, ease: 'power2.out' },
+      0.600
     );
 
     if (beachSeparatorRef.current) {
       tl.fromTo(beachSeparatorRef.current,
         { width: 0, autoAlpha: 0 },
-        { width: 44, autoAlpha: 1, duration: 0.03, ease: 'power2.out' },
-        0.61
+        { width: 44, autoAlpha: 1, duration: 0.025, ease: 'power2.out' },
+        0.610
       );
     }
 
-    // Subtle coastal atmosphere haze
+    // Coastal atmosphere haze
     if (beachAtmosphereRef.current) {
       tl.fromTo(beachAtmosphereRef.current,
         { autoAlpha: 0 },
-        { autoAlpha: 1, duration: 0.05, ease: 'power1.out' },
-        0.60
+        { autoAlpha: 1, duration: 0.050, ease: 'power1.out' },
+        0.600
       );
       tl.to(beachAtmosphereRef.current,
-        { autoAlpha: 0, duration: 0.04, ease: 'power1.in' },
-        0.74
+        { autoAlpha: 0, duration: 0.040, ease: 'power1.in' },
+        0.730
       );
     }
 
     // Beach text drift
     tl.to(beachContentRef.current, {
       y: -15,
-      duration: 0.10,
+      duration: 0.100,
       ease: 'none',
-    }, 0.64);
+    }, 0.635);
 
     // Beach text exit
     tl.to(beachContentRef.current, {
       autoAlpha: 0,
       y: -40,
-      duration: 0.03,
+      duration: 0.035,
       ease: 'power2.in',
-    }, 0.74);
+    }, 0.735);
 
-    // Crossfade: Beach -> Desert
+    // Seamless Crossfade: Beach -> Desert (0.770 -> 0.800)
     tl.to(beachLayerRef.current, {
       autoAlpha: 0,
-      scale: 1.03,
-      duration: 0.04,
+      scale: 1.02,
+      duration: 0.030,
       ease: 'power1.inOut',
-    }, 0.76);
+    }, 0.770);
 
     tl.fromTo(desertLayerRef.current,
-      { autoAlpha: 0, scale: 0.97 },
-      { autoAlpha: 1, scale: 1.0, duration: 0.04, ease: 'power1.inOut' },
-      0.76
+      { autoAlpha: 0, scale: 0.98 },
+      { autoAlpha: 1, scale: 1.0, duration: 0.030, ease: 'power1.inOut' },
+      0.770
     );
 
     /* ================================================================
-       ACT 4: DESERT CLIMAX SCENE (0.80 -> 1.00)
-       - Dedicated Video Scrub: 0.0s -> 7.0s across 0.80 -> 0.96
+       ACT 4: DESERT CLIMAX SCENE & FULL SCRUB (0.800 -> 1.000)
+       - Full 0s -> 10s video scrubbing through the final end state
        ================================================================ */
-    tl.to(videoProgress, {
-      desert: 1.0,
+    tl.to(timelineTargets, {
+      desertProgress: 1.0,
       ease: 'none',
-      duration: 0.16,
+      duration: 0.160,
       onUpdate: () => {
-        const vid = desertVideoRef.current;
-        if (vid) seekVideo(vid, videoProgress.desert * SCENE_SCRUB_SECONDS);
+        const p = timelineTargets.desertProgress;
+        const duration = state.desert.duration || 10.03;
+        state.desert.target = Math.max(0.01, Math.min(p * duration, duration - 0.04));
       },
-    }, 0.80);
+    }, 0.800);
 
     // Desert text & separator entrance
     tl.fromTo(desertContentRef.current,
       { autoAlpha: 0, y: 35 },
-      { autoAlpha: 1, y: 0, duration: 0.04, ease: 'power2.out' },
-      0.80
+      { autoAlpha: 1, y: 0, duration: 0.035, ease: 'power2.out' },
+      0.800
     );
 
     if (desertSeparatorRef.current) {
       tl.fromTo(desertSeparatorRef.current,
         { width: 0, autoAlpha: 0 },
-        { width: 44, autoAlpha: 1, duration: 0.03, ease: 'power2.out' },
-        0.81
+        { width: 44, autoAlpha: 1, duration: 0.025, ease: 'power2.out' },
+        0.810
       );
     }
 
@@ -580,34 +607,34 @@ export default function CinematicHero({ onReady }) {
     if (desertAtmosphereRef.current) {
       tl.fromTo(desertAtmosphereRef.current,
         { autoAlpha: 0 },
-        { autoAlpha: 1, duration: 0.05, ease: 'power1.out' },
-        0.80
+        { autoAlpha: 1, duration: 0.050, ease: 'power1.out' },
+        0.800
       );
     }
 
-    // Desert camera movement simulation
+    // Desert subtle cinematic scale
     tl.to(desertLayerRef.current, {
-      scale: 1.04,
-      x: -10,
-      y: -6,
-      duration: 0.14,
+      scale: 1.03,
+      x: -8,
+      y: -5,
+      duration: 0.140,
       ease: 'sine.out',
-    }, 0.82);
+    }, 0.820);
 
     // Desert text drift
     tl.to(desertContentRef.current, {
       y: -15,
-      duration: 0.08,
+      duration: 0.080,
       ease: 'none',
-    }, 0.84);
+    }, 0.835);
 
     // Desert text exit
     tl.to(desertContentRef.current, {
       autoAlpha: 0,
       y: -35,
-      duration: 0.03,
+      duration: 0.035,
       ease: 'power2.in',
-    }, 0.92);
+    }, 0.915);
 
     // Subtle ambient parallax particles drift
     if (parallaxLayerRef.current) {
@@ -622,8 +649,8 @@ export default function CinematicHero({ onReady }) {
     if (exitFadeRef.current) {
       tl.fromTo(exitFadeRef.current,
         { autoAlpha: 0 },
-        { autoAlpha: 1, duration: 0.06, ease: 'power1.inOut' },
-        0.94
+        { autoAlpha: 1, duration: 0.060, ease: 'power1.inOut' },
+        0.940
       );
     }
   }, { scope: containerRef, dependencies: [prefersReducedMotion, heroSrc, templeSrc, streetSrc, beachSrc, desertSrc] });
@@ -710,6 +737,13 @@ export default function CinematicHero({ onReady }) {
                 preload="auto"
               />
               <div className="cinematic__overlay cinematic__overlay--desert-glow" />
+            </div>
+
+            {/* ======== Smoke / Atmospheric Transition Effect ======== */}
+            <div className="cinematic__smoke-overlay" ref={smokeOverlayRef} aria-hidden="true">
+              <div className="cinematic__smoke-layer cinematic__smoke-layer--1" />
+              <div className="cinematic__smoke-layer cinematic__smoke-layer--2" />
+              <div className="cinematic__smoke-layer cinematic__smoke-layer--3" />
             </div>
 
             {/* ======== Subtle Coastal Atmospheric Effects ======== */}

@@ -7,7 +7,7 @@
 
 .cinematic {
   position: relative;
-  height: 1250vh; /* Continuous 5-chapter scroll travel with ample room for full 7-second video scrubbing */
+  height: 1400vh; /* Continuous 5-chapter scroll travel with expansive room for full video scrubbing */
   --camera-x: 0;
   --camera-y: 0;
   perspective: 1600px;
@@ -164,6 +164,55 @@
     rgba(255, 170, 50, 0.06) 0%,
     transparent 75%
   );
+}
+
+/* ================================================
+   Smoke / Atmospheric Transition Overlay
+   ================================================ */
+
+.cinematic__smoke-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  will-change: opacity, transform, filter;
+  overflow: hidden;
+}
+
+.cinematic__smoke-layer {
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+}
+
+.cinematic__smoke-layer--1 {
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 65%,
+    rgba(215, 230, 245, 0.18) 0%,
+    rgba(160, 185, 205, 0.08) 45%,
+    transparent 75%
+  );
+  filter: blur(28px);
+}
+
+.cinematic__smoke-layer--2 {
+  background: radial-gradient(
+    circle at 55% 55%,
+    rgba(182, 236, 109, 0.10) 0%,
+    rgba(255, 255, 255, 0.05) 40%,
+    transparent 70%
+  );
+  filter: blur(35px);
+}
+
+.cinematic__smoke-layer--3 {
+  background: radial-gradient(
+    ellipse 90% 50% at 50% 85%,
+    rgba(15, 23, 42, 0.4) 0%,
+    transparent 65%
+  );
+  filter: blur(20px);
 }
 
 /* ================================================
