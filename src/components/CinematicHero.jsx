@@ -130,7 +130,10 @@ export default function CinematicHero({ onReady }) {
   const exitFadeRef         = useRef(null);
   const heroReadyRef        = useRef(false);
 
-  /* Timeline Sync State Refs (Bypassing React re-renders completely for 60 FPS) */
+  /* Active Scene Index Ref for Playback Engine */
+  const activeSceneKeyRef   = useRef('hero');
+
+  /* Timeline Sync State Refs */
   const scrubStateRef = useRef({
     hero: { target: 0, current: 0, duration: 10.03, isSeeking: false },
     temple: { target: 0, current: 0, duration: 10.03, isSeeking: false },
@@ -149,7 +152,85 @@ export default function CinematicHero({ onReady }) {
   const desertSrc = useResponsiveVideo(VIDEOS.desert.desktop, VIDEOS.desert.mobile);
 
   /* ================================================
-     High-Performance RAF Video Scrubbing Engine
+     Scroll Speed Limiter & Fast-Skip Blocker
+     Prevents users from whipping past the hero section
+     ================================================ */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || prefersReducedMotion) return undefined;
+
+    let isWithinHero = false;
+
+    const checkBounds = () => {
+      const rect = container.getBoundingClientRect();
+      // Active when hero is occupying the screen and before passing the exit
+      isWithinHero = rect.top <= 50 && rect.bottom >= window.innerHeight * 0.75;
+    };
+
+    window.addEventListener('scroll', checkBounds, { passive: true });
+    checkBounds();
+
+    // Wheel event velocity dampener
+    const handleWheel = (e) => {
+      checkBounds();
+      if (!isWithinHero) return;
+
+      // Detect fast scroll flicks (large wheel delta)
+      const absDelta = Math.abs(e.deltaY);
+      const MAX_WHEEL_STEP = 55; // Clamps excessive scroll impulses
+
+      if (absDelta > MAX_WHEEL_STEP) {
+        e.preventDefault();
+        const clampedDelta = Math.sign(e.deltaY) * MAX_WHEEL_STEP;
+        window.scrollBy({
+          top: clampedDelta,
+          behavior: 'auto',
+        });
+      }
+    };
+
+    // Touch event velocity dampener for mobile
+    let touchStartY = 0;
+    const handleTouchStart = (e) => {
+      if (e.touches && e.touches[0]) {
+        touchStartY = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      checkBounds();
+      if (!isWithinHero || !e.touches || !e.touches[0]) return;
+
+      const currentY = e.touches[0].clientY;
+      const deltaY = touchStartY - currentY;
+      const MAX_TOUCH_STEP = 40;
+
+      if (Math.abs(deltaY) > MAX_TOUCH_STEP) {
+        e.preventDefault();
+        const clampedDelta = Math.sign(deltaY) * MAX_TOUCH_STEP;
+        window.scrollBy({
+          top: clampedDelta,
+          behavior: 'auto',
+        });
+        touchStartY = currentY;
+      }
+    };
+
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      window.removeEventListener('scroll', checkBounds);
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [prefersReducedMotion]);
+
+  /* ================================================
+     Hybrid 60 FPS Video Playback & Scrubbing Engine
+     Combines smooth natural playback with instant reverse
      ================================================ */
   useEffect(() => {
     const videoMap = [
@@ -202,6 +283,8 @@ export default function CinematicHero({ onReady }) {
     const renderLoop = () => {
       if (!isRunning) return;
 
+      const activeKey = activeSceneKeyRef.current;
+
       for (let i = 0; i < videoMap.length; i++) {
         const { key, ref } = videoMap[i];
         const vid = ref.current;
@@ -213,17 +296,57 @@ export default function CinematicHero({ onReady }) {
 
         const diff = target - current;
 
-        // Smoothly interpolate towards target time (lerp: 0.22 per frame)
+        // Smoothly interpolate towards target time (lerp: 0.18 per frame)
         if (Math.abs(diff) > 0.003) {
-          s.current += diff * 0.22;
+          s.current += diff * 0.18;
         } else {
           s.current = target;
         }
 
-        // Only dispatch seek when delta is significant and video is not saturated seeking
-        const timeDelta = Math.abs(vid.currentTime - s.current);
-        if (timeDelta > 0.02) {
-          if (!vid.seeking && !s.isSeeking) {
+        const isActive = (key === activeKey);
+
+        if (isActive) {
+          const timeDelta = s.current - vid.currentTime;
+          const absDelta = Math.abs(timeDelta);
+
+          // If target is ahead within 0.05s - 1.2s, use ultra-smooth native 60fps playback!
+          if (timeDelta > 0.04 && timeDelta < 1.2) {
+            // Speed up or slow down slightly to catch target effortlessly
+            const speed = Math.min(2.5, Math.max(0.6, timeDelta * 3.5));
+            vid.playbackRate = speed;
+            if (vid.paused) {
+              vid.play().catch(() => {});
+            }
+          } else if (timeDelta <= 0.02 && timeDelta >= -0.04) {
+            // Close enough to target: hold steady frame
+            if (!vid.paused) {
+              vid.pause();
+            }
+          } else {
+            // User scrolled backward or larger delta: pause and seek directly
+            if (!vid.paused) {
+              vid.pause();
+            }
+            if (absDelta > 0.03 && !vid.seeking && !s.isSeeking) {
+              s.isSeeking = true;
+              try {
+                if (typeof vid.fastSeek === 'function') {
+                  vid.fastSeek(s.current);
+                } else {
+                  vid.currentTime = s.current;
+                }
+              } catch {
+                s.isSeeking = false;
+              }
+            }
+          }
+        } else {
+          // Inactive scene: keep paused and seek if needed
+          if (!vid.paused) {
+            vid.pause();
+          }
+          const timeDelta = Math.abs(vid.currentTime - s.current);
+          if (timeDelta > 0.08 && !vid.seeking && !s.isSeeking) {
             s.isSeeking = true;
             try {
               if (typeof vid.fastSeek === 'function') {
@@ -247,6 +370,11 @@ export default function CinematicHero({ onReady }) {
       isRunning = false;
       cancelAnimationFrame(animationFrameId);
       cleanups.forEach((fn) => fn());
+      videoMap.forEach(({ ref }) => {
+        if (ref.current && !ref.current.paused) {
+          ref.current.pause();
+        }
+      });
     };
   }, [heroSrc, templeSrc, streetSrc, beachSrc, desertSrc]);
 
@@ -302,7 +430,21 @@ export default function CinematicHero({ onReady }) {
         trigger: containerRef.current,
         start: 'top top',
         end: 'bottom bottom',
-        scrub: 0.15, // Responsive 60 FPS scroll tracking mapped to RAF lerp engine
+        scrub: 0.35, // Deliberate, smooth tracking preventing erratic scrubbing jumps
+        onUpdate: (self) => {
+          const prog = self.progress;
+          if (prog < 0.18) {
+            activeSceneKeyRef.current = 'hero';
+          } else if (prog < 0.38) {
+            activeSceneKeyRef.current = 'temple';
+          } else if (prog < 0.58) {
+            activeSceneKeyRef.current = 'street';
+          } else if (prog < 0.78) {
+            activeSceneKeyRef.current = 'beach';
+          } else {
+            activeSceneKeyRef.current = 'desert';
+          }
+        },
       },
     });
 
